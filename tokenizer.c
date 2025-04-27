@@ -48,10 +48,14 @@ int tok_next(struct tokenizer *t)
 			t->kind = STRING;
 
 			for (t->c = tok_getch(t); t->c != '"' && t->c != EOF; t->c = tok_getch(t)) {
+				// Newlines inside strings are verboten.
+				if (t->c == '\n' || t->c == '\r')
+					goto err;
+
 				if (t->c == '\\') {
 					t->c = tok_getch(t);
 
-					if (t->c == EOF || t->c == '\n' || t->c == '\r')
+					if (t->c == EOF)
 						goto err;
 
 					if (t->c == 'n') tok_append_char(t, '\n');
