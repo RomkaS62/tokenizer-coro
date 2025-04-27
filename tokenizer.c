@@ -56,7 +56,7 @@ int tok_next(struct tokenizer *t)
 					t->c = tok_getch(t);
 
 					// Newlines are verboten even after a backslash.
-					if (t->c == EOF || t->c == '\n' || t->c '\r')
+					if (t->c == EOF || t->c == '\n' || t->c == '\r')
 						goto err;
 
 					if (t->c == 'n') tok_append_char(t, '\n');
