@@ -101,15 +101,6 @@ struct json_kv_pair_t {
 int json_value_parse(struct json_tokenizer_t *t, struct json_value_t *v);
 
 void json_value_object_init(struct json_value_t *v);
-void json_value_object_put(
-		struct json_value_t *v,
-		struct json_string_t *name,
-		struct json_value_t *val);
-
-void json_value_array_init(struct json_value_t *v);
-void json_value_array_append(struct json_value_t *a, struct json_value_t *v);
-
-void json_value_object_init(struct json_value_t *v);
 void json_value_array_init(struct json_value_t *v);
 void json_value_string_init(struct json_value_t *v, const char *text, size_t length);
 void json_value_int_init(struct json_value_t *v, int64_t i);
@@ -123,7 +114,12 @@ void json_string_copy(const struct json_string_t *from, struct json_string_t *to
 void json_string_destroy(struct json_string_t *jstr);
 int json_string_cmp(const struct json_string_t *a, const struct json_string_t *b);
 
-void json_value_object_put(struct json_value_t *v, struct json_string_t *name, struct json_value_t *val);
+void json_value_object_put(
+		struct json_value_t *v,
+		struct json_string_t *name,
+		struct json_value_t *val);
+
+void json_value_array_append(struct json_value_t *a, struct json_value_t *v);
 
 void json_value_copy(const struct json_value_t *from, struct json_value_t *to);
 void json_value_move(struct json_value_t *from, struct json_value_t *to);
