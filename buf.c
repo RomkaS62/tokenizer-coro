@@ -29,10 +29,12 @@ void buf_ensure_capacity(char **buf, size_t *capacity, size_t desired_capacity)
 	if (desired_capacity <= *capacity)
 		return;
 
+	new_capacity = *capacity;
+
 	if (!new_capacity)
 		new_capacity = 1;
 
-	for (new_capacity = *capacity; new_capacity < desired_capacity; new_capacity *= 2)
+	for (; new_capacity < desired_capacity; new_capacity *= 2)
 		;
 
 	*buf = realloc(*buf, new_capacity);
