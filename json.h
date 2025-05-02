@@ -22,11 +22,23 @@ enum json_token_kind_e {
 
 struct json_tokenizer_t {
 	coro_state_t state;
+
 	void *cs;
 	int (*cs_getch)(void *);
+
+	void *error_handler;
+	void (*on_error)(
+			void *error_handler,
+			const char *unexpected_token,
+			size_t length,
+			size_t linenum,
+			size_t char_pos);
+
 	char *token;
 	size_t length;
 	size_t capacity;
+	size_t linenum;
+	size_t char_pos;
 	enum json_token_kind_e kind;
 	int c;
 };
@@ -107,12 +119,13 @@ void json_value_null_init(struct json_value_t *v);
 
 void json_string_set(struct json_string_t *jstr, const char *text, size_t length);
 void json_string_move(struct json_string_t *from, struct json_string_t *to);
+void json_string_copy(const struct json_string_t *from, struct json_string_t *to);
 void json_string_destroy(struct json_string_t *jstr);
 int json_string_cmp(const struct json_string_t *a, const struct json_string_t *b);
 
 void json_value_object_put(struct json_value_t *v, struct json_string_t *name, struct json_value_t *val);
 
-void json_value_copy(struct json_value_t *from, struct json_value_t *to);
+void json_value_copy(const struct json_value_t *from, struct json_value_t *to);
 void json_value_move(struct json_value_t *from, struct json_value_t *to);
 void json_value_destroy(struct json_value_t *v);
 

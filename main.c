@@ -8,6 +8,13 @@ static void write_to_file(FILE *f, const char *bytes, size_t length)
 	fwrite(bytes, 1, length, f);
 }
 
+static void report_error(void *, const char *unexpected_token, size_t length,
+		size_t linenum, size_t char_pos)
+{
+	fprintf(stderr, "Unexpected token at %zu:%zu --- \"%s\"\n",
+			linenum + 1, char_pos + 1, unexpected_token);
+}
+
 int main(void)
 {
 	struct fstream_reader fstr = { 0 };
@@ -18,8 +25,14 @@ int main(void)
 
 	fstream_init(&fstr, stdin, 4096);
 	json_tokenizer_init(&tok, &fstr, (int (*)(void *))fstream_next);
+	json_tokenizer_next(&tok);
 
-	for (i = 0; !json_value_parse(&tok, &val); i++) {
+	tok.on_error = report_error;
+
+	for (i = 0; tok.kind > 0; i++) {
+		if (json_value_parse(&tok, &val))
+			break;
+
 		ret = 0;
 		printf("Object #%zu: ", i);
 		json_value_to_string(&val,  stdout,

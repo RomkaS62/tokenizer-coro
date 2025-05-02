@@ -10,12 +10,41 @@
 
 static inline int jt_getch(struct json_tokenizer_t *t)
 {
-	return t->cs_getch(t->cs);
+	int ret;
+
+	ret = t->cs_getch(t->cs);
+
+	if (ret == '\n') {
+		t->linenum++;
+		t->char_pos = 0;
+	} else if (ret != EOF) {
+		t->char_pos++;
+	}
+
+	return ret;
+}
+
+static inline void jt_report_error(struct json_tokenizer_t *t)
+{
+	if (t->on_error) {
+		t->on_error(t->error_handler, t->token, t->length, t->linenum, t->char_pos);
+		t->on_error = NULL;
+	}
 }
 
 static inline void jt_tok_append(struct json_tokenizer_t *t, char c)
 {
 	buf_append_ch(&t->token, &t->length, &t->capacity, c);
+}
+
+static inline int jt_consume_token(struct json_tokenizer_t *t, enum json_token_kind_e kind)
+{
+	if (t->kind != kind)
+		return 0;
+
+	json_tokenizer_next(t);
+
+	return 1;
 }
 
 static inline int32_t jt_scan_code_unit(struct json_tokenizer_t *t)
@@ -202,12 +231,11 @@ enum json_token_kind_e json_tokenizer_next(struct json_tokenizer_t *t)
 {
 	static const size_t INIT_CAPACITY = 32;
 
-	enum json_token_kind_e ret = JSON_TOK_NONE;
-
 	CO_BEGIN(t->state)
 
 	t->capacity = INIT_CAPACITY;
 	t->token = malloc(INIT_CAPACITY);
+	t->kind = JSON_TOK_NONE;
 
 	for (t->c = jt_getch(t); t->c != EOF;) {
 		t->length = 0;
@@ -216,55 +244,53 @@ enum json_token_kind_e json_tokenizer_next(struct json_tokenizer_t *t)
 			;
 
 		if (t->c == EOF)
-			CO_RETURN(t->state, JSON_TOK_NONE);
+			CO_RETURN(t->state, t->kind = JSON_TOK_NONE);
 
 		if (t->c == '{') {
 			jt_tok_append(t, t->c);
 			t->c = jt_getch(t);
-			ret = JSON_TOK_LEFT_CURLY_BRACE;
+			t->kind = JSON_TOK_LEFT_CURLY_BRACE;
 		} else if (t->c == '}') {
 			jt_tok_append(t, t->c);
 			t->c = jt_getch(t);
-			ret = JSON_TOK_RIGHT_CURLY_BRACE;
+			t->kind = JSON_TOK_RIGHT_CURLY_BRACE;
 		} else if (t->c == '[') {
 			jt_tok_append(t, t->c);
 			t->c = jt_getch(t);
-			ret = JSON_TOK_LEFT_SQUARE_BRACE;
+			t->kind = JSON_TOK_LEFT_SQUARE_BRACE;
 		} else if (t->c == ']') {
 			jt_tok_append(t, t->c);
 			t->c = jt_getch(t);
-			ret = JSON_TOK_RIGHT_SQUARE_BRACE;
+			t->kind = JSON_TOK_RIGHT_SQUARE_BRACE;
 		} else if (t->c == ':') {
 			jt_tok_append(t, t->c);
 			t->c = jt_getch(t);
-			ret = JSON_TOK_COLON;
+			t->kind = JSON_TOK_COLON;
 		} else if (t->c == ',') {
 			jt_tok_append(t, t->c);
 			t->c = jt_getch(t);
-			ret = JSON_TOK_COMMA;
+			t->kind = JSON_TOK_COMMA;
 		} else if (isalpha(t->c)) {
 			for (; isalnum(t->c) || t->c == '_'; t->c = jt_getch(t))
 				buf_append_ch(&t->token, &t->length, &t->capacity, t->c);
 
-			ret = JSON_TOK_NAKED_WORD;
+			t->kind = JSON_TOK_NAKED_WORD;
 		} else if (isdigit(t->c) || t->c == '-') {
-			if ((ret = jt_scan_number(t)) == JSON_TOK_ERROR)
-				CO_RETURN(t->state, JSON_TOK_ERROR);
+			t->kind = jt_scan_number(t);
 		} else if (t->c == '"') {
 			if (jt_scan_string_char(t))
-				CO_RETURN(t->state, JSON_TOK_ERROR);
+				CO_RETURN(t->state, t->kind = JSON_TOK_ERROR);
 
-			ret = JSON_TOK_STRING;
+			t->kind = JSON_TOK_STRING;
 		} else {
-			CO_RETURN(t->state, JSON_TOK_ERROR);
+			CO_RETURN(t->state, t->kind = JSON_TOK_ERROR);
 		}
 
 		jt_tok_append(t, '\0');
-		t->kind = ret;
-		CO_YIELD(t->state, ret);
+		CO_YIELD(t->state, t->kind);
 	}
 
-	CO_RETURN(t->state, JSON_TOK_NONE);
+	CO_RETURN(t->state, t->kind = JSON_TOK_NONE);
 
 	CO_END
 }
@@ -304,9 +330,6 @@ static int json_parse_array(struct json_tokenizer_t *t, struct json_value_t *ret
 
 int json_value_parse(struct json_tokenizer_t *t, struct json_value_t *ret)
 {
-	if (t->kind == JSON_TOK_NONE)
-		json_tokenizer_next(t);
-
 	switch (t->kind) {
 		case JSON_TOK_LEFT_CURLY_BRACE:
 			return json_parse_object(t, ret);
@@ -332,6 +355,7 @@ int json_value_parse(struct json_tokenizer_t *t, struct json_value_t *ret)
 			} else if (strcmp(t->token, "null") == 0) {
 				json_value_null_init(ret);
 			} else {
+				jt_report_error(t);
 				return 1;
 			}
 
@@ -339,6 +363,7 @@ int json_value_parse(struct json_tokenizer_t *t, struct json_value_t *ret)
 
 			break;
 		default:
+			jt_report_error(t);
 			return 1;
 	}
 
@@ -351,32 +376,31 @@ static int json_parse_object(struct json_tokenizer_t *t, struct json_value_t *re
 	struct json_value_t val = { 0 };
 	int error = 0;
 
-	if (t->kind != JSON_TOK_LEFT_CURLY_BRACE)
+	if (!jt_consume_token(t, JSON_TOK_LEFT_CURLY_BRACE))
 		goto err;
 
-	json_tokenizer_next(t);
 	json_value_object_init(ret);
 
 	while (1) {
+		if (jt_consume_token(t, JSON_TOK_RIGHT_CURLY_BRACE))
+			goto end;
+
 		if (json_parse_kv_pair(t, &str, &val))
 			goto err;
 
 		json_value_object_put(ret, &str, &val);
 
-		if (t->kind == JSON_TOK_COMMA) {
-			json_tokenizer_next(t);
+		if (jt_consume_token(t, JSON_TOK_COMMA))
 			continue;
-		}
 
-		if (t->kind == JSON_TOK_RIGHT_CURLY_BRACE) {
-			json_tokenizer_next(t);
+		if (jt_consume_token(t, JSON_TOK_RIGHT_CURLY_BRACE))
 			goto end;
-		}
 
 		goto err;
 	}
 
 err:
+	jt_report_error(t);
 	error = 1;
 
 end:
@@ -391,18 +415,23 @@ static int json_parse_kv_pair(
 		struct json_string_t *k,
 		struct json_value_t *v)
 {
-	if (t->kind != JSON_TOK_STRING)
+	if (t->kind != JSON_TOK_STRING) {
+		jt_report_error(t);
 		return 1;
+	}
 
 	json_string_set(k, t->token, t->length);
-
-	if (json_tokenizer_next(t) != JSON_TOK_COLON)
-		return 1;
-
 	json_tokenizer_next(t);
 
-	if (json_value_parse(t, v))
+	if (!jt_consume_token(t, JSON_TOK_COLON)) {
+		jt_report_error(t);
 		return 1;
+	}
+
+	if (json_value_parse(t, v)) {
+		jt_report_error(t);
+		return 1;
+	}
 
 	return 0;
 }
@@ -412,29 +441,31 @@ static int json_parse_array(struct json_tokenizer_t *t, struct json_value_t *ret
 	struct json_value_t val = { 0 };
 	int error = 0;
 
-	if (t->kind != JSON_TOK_LEFT_SQUARE_BRACE)
+	if (!jt_consume_token(t, JSON_TOK_LEFT_SQUARE_BRACE))
 		return 1;
 
-	while (1) {
-		json_tokenizer_next(t);
+	json_value_array_init(ret);
 
-		if (json_value_parse(t, &val));
+	while (1) {
+		if (jt_consume_token(t, JSON_TOK_RIGHT_SQUARE_BRACE))
+			goto end;
+
+		if (json_value_parse(t, &val))
 			goto err;
 
 		json_value_array_append(ret, &val);
 
-		if (t->kind == JSON_TOK_COMMA)
+		if (jt_consume_token(t, JSON_TOK_COMMA))
 			continue;
 
-		if (t->kind == JSON_TOK_RIGHT_SQUARE_BRACE) {
-			json_tokenizer_next(t);
+		if (jt_consume_token(t, JSON_TOK_RIGHT_SQUARE_BRACE))
 			goto end;
-		}
 
 		goto err;
 	}
 
 err:
+	jt_report_error(t);
 	error = 1;
 
 end:
@@ -445,7 +476,9 @@ end:
 
 void json_value_array_append(struct json_value_t *a, struct json_value_t *v)
 {
-	buf_append((char **)&a->array.values, &a->array.length, &a->array.capacity, sizeof(*v), (char *)v);
+	buf_append((char **)&a->array.values, &a->array.length, &a->array.capacity,
+			sizeof(*v), (char *)v);
+	memset(v, 0, sizeof(*v));
 }
 
 void json_value_object_init(struct json_value_t *v)
@@ -482,6 +515,13 @@ void json_string_move(struct json_string_t *from, struct json_string_t *to)
 {
 	memcpy(to, from, sizeof(*from));
 	memset(from, 0, sizeof(*from));
+}
+
+void json_string_copy(const struct json_string_t *from, struct json_string_t *to)
+{
+	to->length = from->length;
+	to->text = malloc(to->length);
+	memcpy(to->text, from->text, to->length);
 }
 
 void json_string_destroy(struct json_string_t *jstr)
@@ -539,7 +579,7 @@ void json_value_object_put(struct json_value_t *v, struct json_string_t *name, s
 	json_value_move(val, kv.value);
 
 	buf_append((char **)&v->object.fields, &v->object.length, &v->object.capacity,
-			sizeof(kv), (char *)&kv);
+			sizeof(kv), (const char *)&kv);
 
 	qsort(v->object.fields, v->object.length, sizeof(kv),
 			(int(*)(const void*, const void*))json_kv_pair_cmp);
@@ -550,25 +590,54 @@ static int json_kv_pair_cmp(const struct json_kv_pair_t *a, const struct json_kv
 	return json_string_cmp(&a->name, &b->name);
 }
 
-void json_value_copy(struct json_value_t *from, struct json_value_t *to)
+void json_value_copy(const struct json_value_t *from, struct json_value_t *to)
 {
+	const struct json_kv_pair_t *from_field;
+	struct json_kv_pair_t *to_field;
+	const struct json_value_t *from_val;
+	struct json_value_t *to_val;
+	size_t i;
+
 	json_value_destroy(to);
+	memcpy(to, from, sizeof(*to));
 
 	switch (from->type) {
 		case JSON_OBJECT:
+			to->object.fields = calloc(from->object.capacity, sizeof(*from_field));
+
+			for (i = 0; i < from->object.length; i++) {
+				from_field = &from->object.fields[i];
+				to_field = &to->object.fields[i];
+
+				json_string_copy(&from_field->name, &to_field->name);
+				json_value_copy(from_field->value, to_field->value);
+			}
+
 			break;
+
 		case JSON_ARRAY:
+			to->array.values = calloc(from->object.capacity, sizeof(*from_val));
+
+			for (i = 0; i < from->array.length; i++) {
+				from_val = &from->array.values[i];
+				to_val = &to->array.values[i];
+
+				json_value_copy(from_val, to_val);
+			}
+
 			break;
-		case JSON_INT:
-			break;
-		case JSON_FLOAT:
-			break;
+
 		case JSON_STRING:
+			to->string.text = malloc(from->string.length);
+			memcpy(to->string.text, from->string.text, to->string.length);
 			break;
+
+		case JSON_INT:
+		case JSON_FLOAT:
 		case JSON_BOOL:
-			break;
 		case JSON_NULL:
 			break;
+
 		default:
 			abort();
 	}
@@ -650,7 +719,7 @@ void json_value_to_string(
 		case JSON_OBJECT:
 			WRITE_LITERAL("{");
 
-			for (i = 0; i < v->object.length - 1; i++) {
+			for (i = 0; i < v->object.length - 1 && v->object.length; i++) {
 				kv = &v->object.fields[i];
 				json_kv_to_str(kv, sink, sink_write);
 				WRITE_LITERAL(", ");
@@ -665,7 +734,7 @@ void json_value_to_string(
 		case JSON_ARRAY:
 			WRITE_LITERAL("[");
 
-			for (i = 0; i < v->array.length - 1; i++) {
+			for (i = 0; i < v->array.length - 1 && v->array.length; i++) {
 				value = &v->array.values[i];
 				json_value_to_string(value, sink, sink_write);
 				WRITE_LITERAL(", ");
