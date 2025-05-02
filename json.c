@@ -566,14 +566,15 @@ static int json_kv_pair_cmp(const struct json_kv_pair_t *a, const struct json_kv
 
 void json_value_object_put(struct json_value_t *v, struct json_string_t *name, struct json_value_t *val)
 {
-	struct json_kv_pair_t kv;
+	struct json_kv_pair_t kv = { 0 };
 
 	json_string_move(name, &kv.name);
-	kv.value = calloc(1, sizeof(*kv.value));
-	json_value_move(val, kv.value);
+	json_value_move(val, &kv.value);
 
 	buf_append((char **)&v->object.fields, &v->object.length, &v->object.capacity,
 			sizeof(kv), (const char *)&kv);
+
+	memset(val, 0, sizeof(*val));
 
 	qsort(v->object.fields, v->object.length, sizeof(kv),
 			(int(*)(const void*, const void*))json_kv_pair_cmp);
@@ -604,7 +605,7 @@ void json_value_copy(const struct json_value_t *from, struct json_value_t *to)
 				to_field = &to->object.fields[i];
 
 				json_string_copy(&from_field->name, &to_field->name);
-				json_value_copy(from_field->value, to_field->value);
+				json_value_copy(&from_field->value, &to_field->value);
 			}
 
 			break;
@@ -655,7 +656,7 @@ void json_value_destroy(struct json_value_t *v)
 		case JSON_OBJECT:
 			for (i = 0; i < v->object.length; i++) {
 				json_string_destroy(&v->object.fields[i].name);
-				json_value_destroy(v->object.fields[i].value);
+				json_value_destroy(&v->object.fields[i].value);
 			}
 
 			free(v->object.fields);
@@ -775,7 +776,7 @@ static void json_kv_to_str(
 {
 	json_string_to_str(kv->name.text, kv->name.length - 1, sink, sink_write);
 	WRITE_LITERAL(": ");
-	json_value_to_string(kv->value, sink, sink_write);
+	json_value_to_string(&kv->value, sink, sink_write);
 }
 
 static void json_string_to_str(

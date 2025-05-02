@@ -75,11 +75,6 @@ struct json_array_t {
 	struct json_value_t *values;
 };
 
-struct json_kv_pair_t {
-	struct json_string_t name;
-	struct json_value_t *value;
-};
-
 struct json_object_t {
 	size_t length;
 	size_t capacity;
@@ -96,6 +91,11 @@ struct json_value_t {
 		double n_float;
 		int64_t n_int;
 	};
+};
+
+struct json_kv_pair_t {
+	struct json_string_t name;
+	struct json_value_t value;
 };
 
 int json_value_parse(struct json_tokenizer_t *t, struct json_value_t *v);
