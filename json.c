@@ -686,7 +686,7 @@ void json_value_destroy(struct json_value_t *v)
 	memset(v, 0, sizeof(*v));
 }
 
-#define WRITE_LITERAL(__str) (sink_write)(sink, __str, sizeof(__str) - 1)
+#define WRITE_LITERAL(__fn, __sink, __str) (__fn)((__sink), __str, sizeof(__str) - 1)
 
 static void json_kv_to_str(
 		const struct json_kv_pair_t *kv,
@@ -712,33 +712,33 @@ void json_value_to_string(
 
 	switch (v->type) {
 		case JSON_OBJECT:
-			WRITE_LITERAL("{");
+			WRITE_LITERAL(sink_write, sink, "{");
 
 			for (i = 0; i < v->object.length - 1 && v->object.length; i++) {
 				kv = &v->object.fields[i];
 				json_kv_to_str(kv, sink, sink_write);
-				WRITE_LITERAL(", ");
+				WRITE_LITERAL(sink_write, sink, ", ");
 			}
 
 			if (v->object.length > 0)
 				json_kv_to_str(&v->object.fields[i], sink, sink_write);
 
-			WRITE_LITERAL("}");
+			WRITE_LITERAL(sink_write, sink, "}");
 			break;
 
 		case JSON_ARRAY:
-			WRITE_LITERAL("[");
+			WRITE_LITERAL(sink_write, sink, "[");
 
 			for (i = 0; i < v->array.length - 1 && v->array.length; i++) {
 				value = &v->array.values[i];
 				json_value_to_string(value, sink, sink_write);
-				WRITE_LITERAL(", ");
+				WRITE_LITERAL(sink_write, sink, ", ");
 			}
 
 			if (v->array.length > 0)
 				json_value_to_string(&v->array.values[i], sink, sink_write);
 
-			WRITE_LITERAL("]");
+			WRITE_LITERAL(sink_write, sink, "]");
 			break;
 
 		case JSON_STRING:
@@ -757,14 +757,14 @@ void json_value_to_string(
 
 		case JSON_BOOL:
 			if (v->n_int) {
-				WRITE_LITERAL("true");
+				WRITE_LITERAL(sink_write, sink, "true");
 			} else {
-				WRITE_LITERAL("false");
+				WRITE_LITERAL(sink_write, sink, "false");
 			}
 			break;
 
 		case JSON_NULL:
-			WRITE_LITERAL("null");
+			WRITE_LITERAL(sink_write, sink, "null");
 			break;
 	}
 }
@@ -775,7 +775,7 @@ static void json_kv_to_str(
 		void (*sink_write)(void *sink, const char *text, size_t length))
 {
 	json_string_to_str(kv->name.text, kv->name.length - 1, sink, sink_write);
-	WRITE_LITERAL(": ");
+	WRITE_LITERAL(sink_write, sink, ": ");
 	json_value_to_string(&kv->value, sink, sink_write);
 }
 
@@ -785,7 +785,7 @@ static void json_string_to_str(
 		void *sink,
 		void (*sink_write)(void *sink, const char *text, size_t length))
 {
-	WRITE_LITERAL("\"");
+	WRITE_LITERAL(sink_write, sink, "\"");
 	sink_write(sink, s, length);
-	WRITE_LITERAL("\"");
+	WRITE_LITERAL(sink_write, sink, "\"");
 }
