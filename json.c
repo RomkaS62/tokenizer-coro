@@ -381,23 +381,20 @@ static int json_parse_object(struct json_tokenizer_t *t, struct json_value_t *re
 
 	json_value_object_init(ret);
 
-	while (1) {
-		if (jt_consume_token(t, JSON_TOK_RIGHT_CURLY_BRACE))
-			goto end;
+	if (jt_consume_token(t, JSON_TOK_RIGHT_CURLY_BRACE))
+		goto end;
 
+	do {
 		if (json_parse_kv_pair(t, &str, &val))
 			goto err;
 
 		json_value_object_put(ret, &str, &val);
+	} while (jt_consume_token(t, JSON_TOK_COMMA));
 
-		if (jt_consume_token(t, JSON_TOK_COMMA))
-			continue;
-
-		if (jt_consume_token(t, JSON_TOK_RIGHT_CURLY_BRACE))
-			goto end;
-
+	if (!jt_consume_token(t, JSON_TOK_RIGHT_CURLY_BRACE))
 		goto err;
-	}
+
+	goto end;
 
 err:
 	jt_report_error(t);
@@ -442,27 +439,24 @@ static int json_parse_array(struct json_tokenizer_t *t, struct json_value_t *ret
 	int error = 0;
 
 	if (!jt_consume_token(t, JSON_TOK_LEFT_SQUARE_BRACE))
-		return 1;
+		goto err;
 
 	json_value_array_init(ret);
 
-	while (1) {
-		if (jt_consume_token(t, JSON_TOK_RIGHT_SQUARE_BRACE))
-			goto end;
+	if (jt_consume_token(t, JSON_TOK_RIGHT_SQUARE_BRACE))
+		goto end;
 
+	do {
 		if (json_value_parse(t, &val))
 			goto err;
 
 		json_value_array_append(ret, &val);
+	} while (jt_consume_token(t, JSON_TOK_COMMA));
 
-		if (jt_consume_token(t, JSON_TOK_COMMA))
-			continue;
-
-		if (jt_consume_token(t, JSON_TOK_RIGHT_SQUARE_BRACE))
-			goto end;
-
+	if (!jt_consume_token(t, JSON_TOK_RIGHT_SQUARE_BRACE))
 		goto err;
-	}
+
+	goto end;
 
 err:
 	jt_report_error(t);
